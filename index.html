@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BeamSolve — Simply Supported Beam Analyzer</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="main.js" defer></script>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon" aria-hidden="true"></div>
+    <span class="logo-text">Beam<span>Solve</span></span>
+  </div>
+  <span class="header-sub">Simply Supported Beam Analyzer v2.0</span>
+</header>
+
+<div class="main">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar" aria-label="Configuration panel">
+
+    <div class="section">
+      <div class="section-label">Beam Parameters</div>
+      <div class="field-row">
+        <label for="spanLength">Span Length L (m)</label>
+        <input type="number" id="spanLength" value="10" min="0.1" step="0.1" placeholder="e.g. 10">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Point Loads</div>
+      <div class="loads-header" aria-hidden="true">
+        <span>Position a (m)</span>
+        <span>Load P (kN)</span>
+        <span></span>
+      </div>
+      <div id="loadsContainer" role="list"></div>
+      <button class="btn-add" onclick="addLoad()">+ Add Load</button>
+    </div>
+
+    <div class="error-msg" id="errorMsg" role="alert"></div>
+
+    <button class="btn-solve" onclick="solve()">&#9654; ANALYZE BEAM</button>
+
+    <div class="reactions-grid" id="reactionsGrid" style="display:none" aria-live="polite">
+      <div class="reaction-card active">
+        <div class="reaction-label">R_A (Left)</div>
+        <div class="reaction-value" id="valRA">&#8212;</div>
+        <div class="reaction-unit">kN &uarr;</div>
+      </div>
+      <div class="reaction-card active">
+        <div class="reaction-label">R_B (Right)</div>
+        <div class="reaction-value" id="valRB">&#8212;</div>
+        <div class="reaction-unit">kN &uarr;</div>
+      </div>
+    </div>
+
+    <div id="extremesSummary" style="display:none">
+      <div class="section-label" style="padding:0 1.5rem; margin-bottom:0.75rem">Summary</div>
+      <div style="padding:0 1.5rem 1.5rem">
+        <div class="summary-row"><span>Max Shear</span><span id="sumMaxV" class="v2">&#8212;</span></div>
+        <div class="summary-row"><span>Min Shear</span><span id="sumMinV" class="v2">&#8212;</span></div>
+        <div class="summary-row"><span>Max Moment</span><span id="sumMaxM" class="v3">&#8212;</span></div>
+        <div class="summary-row"><span>Min Moment</span><span id="sumMinM" class="v3">&#8212;</span></div>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- CONTENT -->
+  <main class="content" id="mainContent" aria-label="Analysis results">
+
+    <div class="empty-state" id="emptyState">
+      <div class="empty-icon" aria-hidden="true">&#10191;</div>
+      <strong style="font-family:var(--font-mono)">No Analysis Yet</strong>
+      <p>Configure the beam span and add point loads in the left panel, then click <strong>Analyze Beam</strong> to compute reactions, SFD, and BMD.</p>
+    </div>
+
+    <div id="resultsContent" style="display:none" aria-live="polite">
+
+      <!-- Unified stacked diagram panel -->
+      <div class="stacked-panel">
+
+        <!-- Panel header with extremes -->
+        <div class="stacked-header">
+          <div class="stacked-title">Beam Analysis — Stacked Diagrams</div>
+          <div class="stacked-extremes">
+            <span class="se-chip sfd-col">SF<sub>max</sub> <strong id="sfdMax">—</strong> kN</span>
+            <span class="se-chip sfd-col">SF<sub>min</sub> <strong id="sfdMin">—</strong> kN</span>
+            <span class="se-chip bmd-col">BM<sub>max</sub> <strong id="bmdMax">—</strong> kN·m</span>
+            <span class="se-chip bmd-col">BM<sub>min</sub> <strong id="bmdMin">—</strong> kN·m</span>
+          </div>
+        </div>
+
+        <!-- Row labels (left side) -->
+        <div class="stacked-body">
+          <div class="stacked-labels">
+            <div class="row-label">BEAM</div>
+            <div class="row-label sfd-col">SFD</div>
+            <div class="row-label bmd-col">BMD</div>
+          </div>
+
+          <!-- Single unified canvas -->
+          <div class="stacked-canvas-wrap">
+            <canvas id="unifiedCanvas" aria-label="Unified beam, SFD and BMD diagram"></canvas>
+          </div>
+        </div>
+
+        <!-- Shared x-axis label -->
+        <div class="stacked-xaxis">Position along span, x (m)</div>
+
+      </div>
+
+      <div class="table-wrap">
+        <div class="table-head"><h3>Numerical Results &#8212; Key Sections</h3></div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Section</th>
+                <th>x (m)</th>
+                <th>SF (kN)</th>
+                <th>BM (kN&middot;m)</th>
+              </tr>
+            </thead>
+            <tbody id="resultsTable"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+</div>
+
+<div class="status-bar" aria-live="polite">
+  <div class="status-dot" id="statusDot"></div>
+  <span id="statusText">Ready &#8212; configure beam and click Analyze</span>
+</div>
+
+</body>
+</html>
