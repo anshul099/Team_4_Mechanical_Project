@@ -23,7 +23,7 @@ from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import os
 
-from beam_solver import BeamInput, PointLoad, solve, result_to_dict, BeamSolverError
+from beam_solver import solve
 
 # ── Flask setup ──────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -77,7 +77,7 @@ def api_solve():
         try:
             pos = float(item["position"])
             mag = float(item["magnitude"])
-            loads.append(PointLoad(position=pos, magnitude=mag))
+            loads.append((pos, mag))
         except (KeyError, TypeError, ValueError):
             return (
                 jsonify(
@@ -90,14 +90,13 @@ def api_solve():
 
     # ── Solve ────────────────────────────────────────────
     try:
-        beam = BeamInput(span=span, loads=loads)
-        result = solve(beam)
-        return jsonify(result_to_dict(result)), 200
+        result = solve(span=span, loads=loads)
+        return jsonify(result), 200
 
-    except BeamSolverError as exc:
+    except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
-    except Exception as exc:  # pragma: no cover
+    except Exception as exc:
         app.logger.exception("Unexpected error during solve")
         return jsonify({"error": f"Internal server error: {exc}"}), 500
 

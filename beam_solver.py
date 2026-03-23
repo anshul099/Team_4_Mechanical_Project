@@ -1,257 +1,254 @@
 """
-beam_solver.py
-==============
-Core structural mechanics engine for a simply supported beam
-subjected to multiple point loads at arbitrary positions.
+beam_solver.py — Simply Supported Beam Solver
+==============================================
 
-Equations used
---------------
-Equilibrium:
-    ΣFy = 0  →  RA + RB = ΣPi
-    ΣM_A = 0 →  RB = Σ(Pi * ai) / L
+This file contains all the structural engineering calculations.
+It does NOT deal with the website or visuals — it is purely the math engine.
 
-Shear Force at section x:
-    V(x) = RA - Σ Pi  for all ai ≤ x
+HOW A SIMPLY SUPPORTED BEAM WORKS (quick recap):
+  - The beam rests on two supports: A (left) and B (right)
+  - Loads push DOWN on the beam at specific positions
+  - The two supports push UP to keep the beam in balance (these are called "reactions")
+  - We need to find:
+      1. How strong each reaction is  (RA and RB)
+      2. The Shear Force at every point along the beam  (SFD)
+      3. The Bending Moment at every point along the beam  (BMD)
 
-Bending Moment at section x:
-    M(x) = RA·x - Σ Pi·(x − ai)  for all ai ≤ x
-
-Sign Convention
----------------
-    Loads   : downward positive (standard structural)
-    Reactions : upward positive
-    Shear   : positive when left face has upward force
-    Moment  : positive (sagging) when beam bends concave upward
+SIGN CONVENTION (the rules for + and - directions):
+  - Loads pushing DOWN  → positive
+  - Reactions pushing UP → positive
+  - Shear Force: positive when left side pushes up
+  - Bending Moment: positive when the beam sags (bends like a smile)
 """
 
-from dataclasses import dataclass, field
-from typing import List, Tuple
-import math
 
-
-# ─────────────────────────────────────────────
-#  Data classes
-# ─────────────────────────────────────────────
-
-@dataclass
-class PointLoad:
-    """A single point load applied to the beam."""
-    position: float   # metres from left support A
-    magnitude: float  # kN, positive = downward
-
-
-@dataclass
-class BeamInput:
-    """Full problem definition."""
-    span: float                          # total span L (m)
-    loads: List[PointLoad] = field(default_factory=list)
-    num_sections: int = 500              # sampling density for diagrams
-
-
-@dataclass
-class SectionResult:
-    """Results at a single cross-section."""
-    x: float           # position (m)
-    shear: float       # shear force V (kN)
-    moment: float      # bending moment M (kN·m)
-
-
-@dataclass
-class BeamResult:
-    """Complete analysis output."""
-    span: float
-    reaction_a: float              # RA (kN)
-    reaction_b: float              # RB (kN)
-    sections: List[SectionResult]  # dense curve data
-    key_sections: List[SectionResult]  # only critical positions
-    max_shear: float
-    min_shear: float
-    max_moment: float
-    min_moment: float
-    loads: List[PointLoad]
-
-
-# ─────────────────────────────────────────────
-#  Validation
-# ─────────────────────────────────────────────
-
-class BeamSolverError(ValueError):
-    """Raised when beam input is invalid."""
-    pass
-
-
-def validate(beam: BeamInput) -> None:
-    """Raise BeamSolverError if any input constraint is violated."""
-    if beam.span <= 0:
-        raise BeamSolverError("Span length must be greater than zero.")
-    if not beam.loads:
-        raise BeamSolverError("At least one point load is required.")
-    for i, load in enumerate(beam.loads, start=1):
-        if load.position < 0 or load.position > beam.span:
-            raise BeamSolverError(
-                f"Load {i}: position {load.position} m is outside "
-                f"the span [0, {beam.span}] m."
-            )
-        if load.magnitude == 0:
-            raise BeamSolverError(f"Load {i}: magnitude cannot be zero.")
-
-
-# ─────────────────────────────────────────────
-#  Core solver
-# ─────────────────────────────────────────────
-
-def _shear_at(x: float, ra: float, loads: List[PointLoad]) -> float:
-    """Compute shear force at position x."""
-    v = ra
-    for load in loads:
-        if load.position <= x + 1e-9:
-            v -= load.magnitude
-    return v
-
-
-def _moment_at(x: float, ra: float, loads: List[PointLoad]) -> float:
-    """Compute bending moment at position x."""
-    m = ra * x
-    for load in loads:
-        if load.position <= x + 1e-9:
-            m -= load.magnitude * (x - load.position)
-    return m
-
-
-def solve(beam: BeamInput) -> BeamResult:
+def solve(span, loads, n_samples=500):
     """
-    Analyse the simply supported beam and return full results.
+    This is the main (and only) function in this file.
+    You give it the beam length and where the loads are,
+    and it gives back everything needed to draw the diagrams.
 
-    Parameters
-    ----------
-    beam : BeamInput
-        Validated beam definition.
+    INPUTS:
+      span      → the total length of the beam in metres (e.g. 10.0)
+      loads     → a list of (position, magnitude) pairs, e.g.:
+                    [(3.0, 20.0), (7.0, 15.0)]
+                  means: a 20 kN load at 3 m, and a 15 kN load at 7 m
+      n_samples → how many points to calculate along the beam for smooth curves
+                  (500 is plenty — more = smoother but slower)
 
-    Returns
-    -------
-    BeamResult
-        Reactions, SFD/BMD arrays, and key-section table.
+    OUTPUT:
+      a dictionary (a labelled collection of results) containing:
+        - reaction_a, reaction_b  : the upward forces at each support
+        - sections                : shear + moment at ~500 points (used for graphs)
+        - key_sections            : shear + moment at important points only (used for table)
+        - max/min shear + moment  : the peak values
     """
-    validate(beam)
 
-    L = beam.span
-    loads = beam.loads
+    # ══════════════════════════════════════════════════════
+    # STEP 1 — CHECK THE INPUTS MAKE SENSE
+    # Before doing any math, we make sure the user hasn't
+    # entered something impossible (like a zero-length beam).
+    # If something is wrong, we stop immediately and explain why.
+    # ══════════════════════════════════════════════════════
 
-    # ── Reactions ──────────────────────────────────────
-    total_load = sum(ld.magnitude for ld in loads)
-    rb = sum(ld.magnitude * ld.position for ld in loads) / L
-    ra = total_load - rb
+    if span <= 0:
+        raise ValueError("Span must be greater than zero.")
+        # "raise ValueError" means: stop everything and show this error message
 
-    # ── Build dense x-axis (captures jumps at load points) ──
-    critical_xs: set = {0.0, L}
-    for ld in loads:
-        # Bracket each load with epsilon positions to capture step change
-        eps = 1e-6
-        critical_xs.update({
-            max(0.0, ld.position - eps),
-            ld.position,
-            min(L, ld.position + eps),
-        })
+    if not loads:
+        raise ValueError("At least one point load is required.")
 
-    # Evenly-spaced samples for smooth curves
-    step = L / beam.num_sections
-    for i in range(beam.num_sections + 1):
-        critical_xs.add(round(i * step, 10))
+    for i, (a, P) in enumerate(loads, 1):
+        # Loop through each load and check it individually
+        # 'a' is the position along the beam, 'P' is the load magnitude
 
-    xs = sorted(x for x in critical_xs if 0.0 <= x <= L)
+        if not (0 <= a <= span):
+            raise ValueError(f"Load {i}: position {a} m is outside span [0, {span}] m.")
+            # The load must sit ON the beam, not beyond either end
 
-    # ── Compute SFD / BMD ──────────────────────────────
-    sections: List[SectionResult] = []
-    for x in xs:
-        sections.append(SectionResult(
-            x=round(x, 6),
-            shear=round(_shear_at(x, ra, loads), 6),
-            moment=round(_moment_at(x, ra, loads), 6),
-        ))
+        if P == 0:
+            raise ValueError(f"Load {i}: magnitude cannot be zero.")
+            # A zero load does nothing — probably a mistake
 
-    # ── Key sections (for table) ────────────────────────
-    key_xs_set: set = {0.0, L, round(L / 2, 6)}
-    for ld in loads:
-        key_xs_set.update({
-            max(0.0, ld.position - 1e-6),
-            ld.position,
-            min(L, ld.position + 1e-6),
-        })
+    # ══════════════════════════════════════════════════════
+    # STEP 2 — CALCULATE THE SUPPORT REACTIONS (RA and RB)
+    #
+    # We use two rules of static equilibrium:
+    #
+    #   Rule 1 — The beam doesn't fly up or sink down:
+    #     RA + RB = sum of all loads
+    #
+    #   Rule 2 — The beam doesn't rotate (take moments about A):
+    #     RB × L = P1×a1 + P2×a2 + ...
+    #     → RB = (sum of each load × its distance from A) ÷ span
+    #     → RA = total load − RB
+    # ══════════════════════════════════════════════════════
 
-    key_sections: List[SectionResult] = []
-    for x in sorted(key_xs_set):
-        key_sections.append(SectionResult(
-            x=round(x, 4),
-            shear=round(_shear_at(x, ra, loads), 4),
-            moment=round(_moment_at(x, ra, loads), 4),
-        ))
+    total_load = sum(P for _, P in loads)
+    # Add up all the load magnitudes to get total downward force
 
-    # ── Extremes ────────────────────────────────────────
-    shears  = [s.shear  for s in sections]
-    moments = [s.moment for s in sections]
+    RB = sum(P * a for a, P in loads) / span
+    # Moment equilibrium about A:
+    # Each load contributes (magnitude × distance from A)
+    # Divide by span to get RB
 
-    return BeamResult(
-        span=L,
-        reaction_a=round(ra, 4),
-        reaction_b=round(rb, 4),
-        sections=sections,
-        key_sections=key_sections,
-        max_shear=round(max(shears), 4),
-        min_shear=round(min(shears), 4),
-        max_moment=round(max(moments), 4),
-        min_moment=round(min(moments), 4),
-        loads=loads,
+    RA = total_load - RB
+    # Once we know RB, RA is simply the remainder
+
+    # ══════════════════════════════════════════════════════
+    # STEP 3 — DEFINE HOW TO CALCULATE V AND M AT ANY POINT
+    #
+    # Imagine standing at position x on the beam and looking LEFT.
+    # Everything to your left is trying to push/rotate the beam.
+    #
+    # Shear Force V(x):
+    #   Start with the left reaction RA pushing up.
+    #   Subtract any loads that have already been applied at or before x.
+    #   Result: the net vertical force trying to "slide" the beam at x.
+    #
+    # Bending Moment M(x):
+    #   Start with RA acting over the distance x (RA × x).
+    #   Subtract the moment each load creates: load × (x − load position).
+    #   Only include loads that are at or before x.
+    #   Result: the net turning force trying to "bend" the beam at x.
+    #
+    # These are written as nested functions (closures) so they can
+    # directly use RA and loads without needing to pass them every time.
+    # ══════════════════════════════════════════════════════
+
+    def V(x):
+        # Shear force at position x
+        return RA - sum(P for a, P in loads if a <= x + 1e-9)
+        # Note: "a <= x + 1e-9" means "a is at or just before x"
+        # The tiny 1e-9 (0.000000001) handles floating point rounding —
+        # without it, a load sitting exactly at x might be missed
+
+    def M(x):
+        # Bending moment at position x
+        return RA * x - sum(P * (x - a) for a, P in loads if a <= x + 1e-9)
+        # Each load contributes: magnitude × (how far x is past the load)
+
+    # ══════════════════════════════════════════════════════
+    # STEP 4 — CHOOSE WHERE TO CALCULATE ALONG THE BEAM
+    #
+    # We need to evaluate V and M at many x positions to draw smooth graphs.
+    # We use two strategies together:
+    #
+    #   a) Evenly spaced points  (e.g. every 0.02 m for a 10 m beam)
+    #      → gives smooth curves between loads
+    #
+    #   b) Points just before and after each load  (±0.000001 m)
+    #      → this is CRITICAL because shear force jumps suddenly at a load.
+    #        If we don't sample right at the jump, the graph looks wrong.
+    #        Think of it like zooming in on a cliff edge to show the drop.
+    # ══════════════════════════════════════════════════════
+
+    xs = set()
+    # A "set" automatically removes duplicate values
+
+    for i in range(n_samples + 1):
+        xs.add(round(i * span / n_samples, 10))
+    # Evenly spaced x values from 0 to span
+
+    for a, _ in loads:
+        xs.update(
+            {
+                max(0, a - 1e-6),  # just before the load
+                a,  # exactly at the load
+                min(span, a + 1e-6),  # just after the load
+            }
+        )
+    # Add bracketing points around every load position
+
+    xs = sorted(x for x in xs if 0 <= x <= span)
+    # Sort numerically and remove anything outside the beam
+
+    # ══════════════════════════════════════════════════════
+    # STEP 5 — COMPUTE V AND M AT EVERY CHOSEN POINT
+    #
+    # Now we simply call V(x) and M(x) for every x in our list.
+    # This produces the data arrays used to draw the SFD and BMD graphs.
+    # ══════════════════════════════════════════════════════
+
+    sections = [
+        {"x": round(x, 6), "shear": round(V(x), 6), "moment": round(M(x), 6)}
+        for x in xs
+    ]
+    # List comprehension: one dictionary per x position
+    # round(..., 6) keeps 6 decimal places — avoids very long floats
+
+    # ══════════════════════════════════════════════════════
+    # STEP 6 — KEY SECTIONS (for the results table)
+    #
+    # The full 500-point dataset is great for graphs but too much to show
+    # in a table. Instead, we pick only the "interesting" positions:
+    #   - x = 0         (support A)
+    #   - x = span      (support B)
+    #   - x = span/2    (midspan — often where max moment occurs)
+    #   - just before and after each load  (where shear jumps)
+    # ══════════════════════════════════════════════════════
+
+    key_xs = sorted(
+        {0.0, span, round(span / 2, 6)}  # supports + midspan
+        | {max(0, a - 1e-6) for a, _ in loads}  # just before each load
+        | {a for a, _ in loads}  # exactly at each load
+        | {min(span, a + 1e-6) for a, _ in loads}  # just after each load
     )
+    # The "|" operator merges sets together (like a union in maths)
 
+    key_sections = [
+        {"x": round(x, 4), "shear": round(V(x), 4), "moment": round(M(x), 4)}
+        for x in key_xs
+    ]
 
-# ─────────────────────────────────────────────
-#  Serialisation helpers
-# ─────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════
+    # STEP 7 — FIND THE PEAK VALUES
+    #
+    # Simply scan through all computed shear and moment values
+    # and pick the largest and smallest.
+    # These are displayed as the "Max / Min" chips on the dashboard.
+    # ══════════════════════════════════════════════════════
 
-def result_to_dict(result: BeamResult) -> dict:
-    """Convert BeamResult to a JSON-serialisable dictionary."""
+    shears = [s["shear"] for s in sections]
+    moments = [s["moment"] for s in sections]
+
+    # ══════════════════════════════════════════════════════
+    # STEP 8 — PACKAGE AND RETURN EVERYTHING
+    #
+    # We bundle all results into one dictionary and return it.
+    # app.py will receive this and send it to the browser as JSON.
+    # ══════════════════════════════════════════════════════
+
     return {
-        "span": result.span,
-        "reaction_a": result.reaction_a,
-        "reaction_b": result.reaction_b,
-        "max_shear": result.max_shear,
-        "min_shear": result.min_shear,
-        "max_moment": result.max_moment,
-        "min_moment": result.min_moment,
-        "loads": [
-            {"position": ld.position, "magnitude": ld.magnitude}
-            for ld in result.loads
-        ],
-        "sections": [
-            {"x": s.x, "shear": s.shear, "moment": s.moment}
-            for s in result.sections
-        ],
-        "key_sections": [
-            {"x": s.x, "shear": s.shear, "moment": s.moment}
-            for s in result.key_sections
-        ],
+        "span": span,
+        "reaction_a": round(RA, 4),
+        "reaction_b": round(RB, 4),
+        "max_shear": round(max(shears), 4),
+        "min_shear": round(min(shears), 4),
+        "max_moment": round(max(moments), 4),
+        "min_moment": round(min(moments), 4),
+        "loads": [{"position": a, "magnitude": P} for a, P in loads],
+        "sections": sections,  # ~500 points  → used for graphs
+        "key_sections": key_sections,  # ~10 points   → used for table
     }
 
 
-# ─────────────────────────────────────────────
-#  Quick CLI test
-# ─────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════
+# QUICK TEST — runs only when you execute this file directly
+#
+# Type in your terminal:  python beam_solver.py
+# It will solve a simple example and print the results.
+# This is useful to verify the math without running the website.
+# ══════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    beam = BeamInput(
-        span=10.0,
-        loads=[
-            PointLoad(position=3.0, magnitude=20.0),
-            PointLoad(position=7.0, magnitude=15.0),
-        ],
-    )
-    res = solve(beam)
-    print(f"RA = {res.reaction_a} kN")
-    print(f"RB = {res.reaction_b} kN")
-    print(f"Max Shear  = {res.max_shear} kN")
-    print(f"Max Moment = {res.max_moment} kN·m")
-    print("\nKey sections:")
-    print(f"{'x (m)':>8}  {'V (kN)':>10}  {'M (kN·m)':>12}")
+    result = solve(span=10.0, loads=[(3.0, 20.0), (7.0, 15.0)])
+
+    print(f"RA = {result['reaction_a']} kN")
+    print(f"RB = {result['reaction_b']} kN")
+    print(f"Max Shear  = {result['max_shear']} kN")
+    print(f"Max Moment = {result['max_moment']} kN·m")
+    print(f"\n{'x (m)':>8}  {'V (kN)':>10}  {'M (kN·m)':>12}")
     print("-" * 36)
-    for s in res.key_sections:
-        print(f"{s.x:>8.3f}  {s.shear:>10.3f}  {s.moment:>12.3f}")
+    for s in result["key_sections"]:
+        print(f"{s['x']:>8.3f}  {s['shear']:>10.3f}  {s['moment']:>12.3f}")
