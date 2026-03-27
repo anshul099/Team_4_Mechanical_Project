@@ -168,8 +168,11 @@ function renderResults(data) {
   document.getElementById("sumMinM").textContent  = `${data.min_moment.toFixed(3)} kN·m`;
   document.getElementById("extremesSummary").style.display = "block";
 
-  drawUnified(data);
-  buildTable(data.key_sections, data.loads, data.span);
+  // Wait for layout to be computed before drawing canvas
+  setTimeout(() => {
+    drawUnified(data);
+    buildTable(data.key_sections, data.loads, data.span);
+  }, 0);
 }
 
 // ─────────────────────────────────────────────
@@ -185,7 +188,13 @@ function renderResults(data) {
 function drawUnified(data) {
   const canvas = document.getElementById("unifiedCanvas");
   const dpr    = window.devicePixelRatio || 1;
-  const W      = canvas.parentElement.clientWidth || 800;
+  
+  // Get parent width and account for padding
+  const parent = canvas.parentElement;
+  const parentStyle = window.getComputedStyle(parent);
+  const paddingLeft = parseFloat(parentStyle.paddingLeft) || 0;
+  const paddingRight = parseFloat(parentStyle.paddingRight) || 0;
+  const W = Math.max(400, parent.clientWidth - paddingLeft - paddingRight) || 800;
 
   // Row heights
   const ROW_BEAM = 170;
