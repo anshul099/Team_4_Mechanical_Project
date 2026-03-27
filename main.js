@@ -15,7 +15,7 @@
 // ─────────────────────────────────────────────
 //  CONFIG
 // ─────────────────────────────────────────────
-const API_URL = "/api/solve";
+const API_URL = "http://localhost:5000/api/solve";
 
 // ─────────────────────────────────────────────
 //  STATE
@@ -169,7 +169,7 @@ function renderResults(data) {
   document.getElementById("extremesSummary").style.display = "block";
 
   drawUnified(data);
-  buildTable(data.key_sections);
+  buildTable(data.key_sections, data.loads, data.span);
 }
 
 // ─────────────────────────────────────────────
@@ -474,19 +474,24 @@ function drawDownArrow(ctx, x, startY, length, color, label) {
 
 /**
  * Populate the numerical results table with key sections.
+ * Now receives loads array so labels can identify each load position.
  * @param {{ x: number, shear: number, moment: number }[]} keySections
+ * @param {{ position: number, magnitude: number }[]} loads
+ * @param {number} span
  */
-function buildTable(keySections) {
+function buildTable(keySections, loads, span) {
   const tbody = document.getElementById("resultsTable");
   tbody.innerHTML = "";
 
+  // Build a lookup: for each load, record its index (1-based) and position
+  // so we can match x values against them with tolerance
   keySections.forEach(({ x, shear: V, moment: M }) => {
     const Vc = Math.abs(V) < 1e-4 ? "td-zero" : V > 0 ? "td-pos" : "td-neg";
     const Mc = Math.abs(M) < 1e-4 ? "td-zero" : M > 0 ? "td-pos" : "td-neg";
     tbody.innerHTML += `
       <tr>
-        <td>${sectionLabel(x, keySections)}</td>
-        <td>${x.toFixed(3)}</td>
+        <td>${sectionLabel(x, span, loads)}</td>
+        <td>${x.toFixed(4)}</td>
         <td class="${Vc}">${V.toFixed(4)}</td>
         <td class="${Mc}">${M.toFixed(4)}</td>
       </tr>
@@ -495,14 +500,42 @@ function buildTable(keySections) {
 }
 
 /**
- * Generate a human-readable label for a section position.
+ * Generate a precise human-readable label for a section position.
+ * Distinguishes: Support A, Support B, midspan,
+ * just before a load, exactly at a load, just after a load.
+ *
+ * @param {number} x       - position to label
+ * @param {number} span    - total beam span
+ * @param {{ position: number, magnitude: number }[]} loads
  */
-function sectionLabel(x, sections) {
-  const L = Math.max(...sections.map((s) => s.x));
-  if (x === 0)              return "Support A";
-  if (Math.abs(x - L) < 1e-4) return "Support B";
-  if (Math.abs(x - L / 2) < 1e-3) return `Midspan (${x.toFixed(2)} m)`;
-  return `x = ${x.toFixed(3)} m`;
+function sectionLabel(x, span, loads) {
+  const EPS = 5e-3;  // tolerance for matching positions (*Changed)
+
+  // Support ends
+  if (x < EPS)                    return "Support A  (x = 0)";
+  if (Math.abs(x - span) < EPS)   return "Support B  (x = " + span.toFixed(2) + " m)";
+
+  // Check against each load position
+  for (let i = 0; i < loads.length; i++) {
+  const a    = loads[i].position;
+  const P    = loads[i].magnitude;
+  const name = `P${i + 1} = ${P} kN  @  ${a} m`;
+
+  // Just AFTER load (priority)
+  if (x > a && Math.abs(x - a) < 1e-2) {
+    return `Just after load P${i + 1}`;
+  }
+
+  // AT load
+  if (Math.abs(x - a) < 1e-6) {
+    return `At load P${i + 1}`;
+  }
+
+  // Just BEFORE load
+  if (x < a && Math.abs(x - a) < 1e-2) {
+    return `Just before load P${i + 1}`;
+  }
+}
 }
 
 // ─────────────────────────────────────────────

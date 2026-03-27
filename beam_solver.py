@@ -189,17 +189,15 @@ def solve(span, loads, n_samples=500):
     # ══════════════════════════════════════════════════════
 
     key_xs = sorted(
-        {0.0, span, round(span / 2, 6)}  # supports + midspan
+        # include supports and positions around each load
+        {0.0, span}
         | {max(0, a - 1e-6) for a, _ in loads}  # just before each load
         | {a for a, _ in loads}  # exactly at each load
         | {min(span, a + 1e-6) for a, _ in loads}  # just after each load
     )
     # The "|" operator merges sets together (like a union in maths)
 
-    key_sections = [
-        {"x": round(x, 4), "shear": round(V(x), 4), "moment": round(M(x), 4)}
-        for x in key_xs
-    ]
+    key_sections = [{"x": x, "shear": V(x), "moment": M(x)} for x in key_xs]
 
     # ══════════════════════════════════════════════════════
     # STEP 7 — FIND THE PEAK VALUES
