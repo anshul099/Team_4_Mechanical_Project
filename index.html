@@ -1,92 +1,222 @@
 <!DOCTYPE html>
+<!-- DOCTYPE tells the browser this is a modern HTML5 document -->
+
 <html lang="en">
+<!-- lang="en" tells the browser (and screen readers) the page is in English -->
+
 <head>
+  <!-- The <head> section contains metadata — information ABOUT the page,
+       not content that appears on screen -->
+
+  <!-- charset="UTF-8" means the page supports all international characters -->
   <meta charset="UTF-8">
+
+  <!-- viewport tag makes the page scale correctly on mobile devices.
+       width=device-width : use the device screen width
+       initial-scale=1.0  : start at 100% zoom (no pinch-zoom forced) -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- The text shown on the browser tab -->
   <title>BeamSolve — Simply Supported Beam Analyzer</title>
+
+  <!-- Load our external CSS stylesheet — all visual styling is in style.css -->
   <link rel="stylesheet" href="style.css">
+
+  <!-- Load our JavaScript file — defer means it runs AFTER the HTML is fully parsed
+       This prevents errors from scripts trying to find elements that don't exist yet -->
   <script src="main.js" defer></script>
 </head>
-<body>
 
+<body>
+<!-- The <body> contains everything the user sees on screen -->
+
+<!-- ═══════════════════════════════════════════════════════
+     HEADER BAR
+     Shown at the very top of the page across the full width.
+     Contains the logo on the left and a subtitle on the right.
+═══════════════════════════════════════════════════════ -->
 <header>
+
+  <!-- Logo group: icon shape + text -->
   <div class="logo">
+
+    <!-- The beam icon — a CSS-drawn I-beam shape using clip-path.
+         aria-hidden="true" hides it from screen readers (it's decorative) -->
     <div class="logo-icon" aria-hidden="true"></div>
+
+    <!-- App name — "Solve" is wrapped in <span> so it can be coloured differently via CSS -->
     <span class="logo-text">Beam<span>Solve</span></span>
   </div>
+
+  <!-- Version subtitle displayed on the right side of the header -->
   <span class="header-sub">Simply Supported Beam Analyzer v2.0</span>
+
 </header>
 
+
+<!-- ═══════════════════════════════════════════════════════
+     MAIN LAYOUT CONTAINER
+     A CSS Grid that splits the page into two columns:
+       Left  : sidebar (input controls)
+       Right : main content (diagrams and results)
+═══════════════════════════════════════════════════════ -->
 <div class="main">
 
-  <!-- SIDEBAR -->
+
+  <!-- ═══════════════════════════════════════════════════
+       SIDEBAR — Left column
+       Contains all user inputs and results summary.
+       aria-label helps screen readers describe this region.
+  ═══════════════════════════════════════════════════ -->
   <aside class="sidebar" aria-label="Configuration panel">
 
+
+    <!-- ── BEAM PARAMETERS SECTION ──────────────────── -->
+    <!-- A bordered section containing the span length input -->
     <div class="section">
+
+      <!-- Section title with a dot indicator (styled via CSS) -->
       <div class="section-label">Beam Parameters</div>
+
+      <!-- A field-row wraps a label and its input together -->
       <div class="field-row">
+        <!-- for="spanLength" links this label to the input with id="spanLength"
+             Clicking the label will focus the input field -->
         <label for="spanLength">Span Length L (m)</label>
+
+        <!-- Number input for the beam span:
+             id="spanLength" : lets main.js find this element
+             value="10"      : default value
+             min="0.1"       : prevents zero or negative spans
+             step="0.1"      : arrow keys increase/decrease by 0.1 -->
         <input type="number" id="spanLength" value="10" min="0.1" step="0.1" placeholder="e.g. 10">
       </div>
     </div>
 
+
+    <!-- ── POINT LOADS SECTION ───────────────────────── -->
     <div class="section">
+
       <div class="section-label">Point Loads</div>
+
+      <!-- Column header row showing what each input column means
+           aria-hidden="true" hides this from screen readers (inputs have their own labels) -->
       <div class="loads-header" aria-hidden="true">
-        <span>Position a (m)</span>
-        <span>Load P (kN)</span>
-        <span></span>
+        <span>Position a (m)</span>  <!-- First input column: distance from support A -->
+        <span>Load P (kN)</span>     <!-- Second input column: load magnitude -->
+        <span></span>                <!-- Third column: empty space for the remove button -->
       </div>
+
+      <!-- This div is empty at first — main.js fills it dynamically with load rows
+           role="list" tells screen readers this is a list of items -->
       <div id="loadsContainer" role="list"></div>
+
+      <!-- Button that calls addLoad() in main.js to add a new empty load row -->
       <button class="btn-add" onclick="addLoad()">+ Add Load</button>
     </div>
 
+
+    <!-- ── ERROR MESSAGE BOX ─────────────────────────── -->
+    <!-- Hidden by default (display:none in CSS).
+         main.js makes this visible when there's an input error.
+         role="alert" makes screen readers announce this immediately when it appears -->
     <div class="error-msg" id="errorMsg" role="alert"></div>
 
+
+    <!-- ── ANALYZE BUTTON ────────────────────────────── -->
+    <!-- Clicking this calls solve() in main.js which sends the data to Flask.
+         &#9654; is the HTML code for the ▶ play triangle symbol -->
     <button class="btn-solve" onclick="solve()">&#9654; ANALYZE BEAM</button>
 
+
+    <!-- ── REACTIONS DISPLAY ─────────────────────────── -->
+    <!-- Hidden until solve() receives results from the server.
+         aria-live="polite" tells screen readers to announce changes when they happen -->
     <div class="reactions-grid" id="reactionsGrid" style="display:none" aria-live="polite">
+
+      <!-- Card showing the left support reaction RA -->
       <div class="reaction-card active">
         <div class="reaction-label">R_A (Left)</div>
+        <!-- id="valRA" lets main.js update this value after solving
+             &#8212; is the — (em dash) shown before any analysis -->
         <div class="reaction-value" id="valRA">&#8212;</div>
+        <!-- &uarr; is the ↑ upward arrow symbol -->
         <div class="reaction-unit">kN &uarr;</div>
       </div>
+
+      <!-- Card showing the right support reaction RB -->
       <div class="reaction-card active">
         <div class="reaction-label">R_B (Right)</div>
         <div class="reaction-value" id="valRB">&#8212;</div>
         <div class="reaction-unit">kN &uarr;</div>
       </div>
+
     </div>
 
+
+    <!-- ── EXTREMES SUMMARY ───────────────────────────── -->
+    <!-- Hidden until solve() has results. Shows max/min shear and moment. -->
     <div id="extremesSummary" style="display:none">
+
       <div class="section-label" style="padding:0 1.5rem; margin-bottom:0.75rem">Summary</div>
+
       <div style="padding:0 1.5rem 1.5rem">
+        <!-- Each summary-row has a label on the left and a value on the right -->
+        <!-- class="v2" colours the value orange (SFD colour) via CSS -->
         <div class="summary-row"><span>Max Shear</span><span id="sumMaxV" class="v2">&#8212;</span></div>
         <div class="summary-row"><span>Min Shear</span><span id="sumMinV" class="v2">&#8212;</span></div>
+        <!-- class="v3" colours the value green (BMD colour) via CSS -->
         <div class="summary-row"><span>Max Moment</span><span id="sumMaxM" class="v3">&#8212;</span></div>
         <div class="summary-row"><span>Min Moment</span><span id="sumMinM" class="v3">&#8212;</span></div>
       </div>
+
     </div>
 
   </aside>
+  <!-- End of sidebar -->
 
-  <!-- CONTENT -->
+
+  <!-- ═══════════════════════════════════════════════════
+       MAIN CONTENT — Right column
+       Shows the empty state before analysis,
+       and the results (diagrams + table) after analysis.
+  ═══════════════════════════════════════════════════ -->
   <main class="content" id="mainContent" aria-label="Analysis results">
 
+
+    <!-- ── EMPTY STATE ───────────────────────────────── -->
+    <!-- Shown before the user runs any analysis.
+         Hidden by main.js once results are available. -->
     <div class="empty-state" id="emptyState">
+
+      <!-- A large icon — &#10191; is the ⇯ arrow symbol -->
       <div class="empty-icon" aria-hidden="true">&#10191;</div>
+
       <strong style="font-family:var(--font-mono)">No Analysis Yet</strong>
-      <p>Configure the beam span and add point loads in the left panel, then click <strong>Analyze Beam</strong> to compute reactions, SFD, and BMD.</p>
+
+      <p>Configure the beam span and add point loads in the left panel,
+         then click <strong>Analyze Beam</strong> to compute reactions, SFD, and BMD.</p>
     </div>
 
+
+    <!-- ── RESULTS AREA ──────────────────────────────── -->
+    <!-- Hidden by default — main.js makes it visible after a successful solve.
+         aria-live="polite" announces content changes to screen readers. -->
     <div id="resultsContent" style="display:none" aria-live="polite">
 
-      <!-- Unified stacked diagram panel -->
+
+      <!-- ── STACKED DIAGRAM PANEL ─────────────────── -->
+      <!-- A single panel containing the beam schematic, SFD, and BMD
+           all drawn on one HTML5 canvas element, stacked vertically. -->
       <div class="stacked-panel">
 
-        <!-- Panel header with extremes -->
+        <!-- Top bar showing panel title and extreme value chips -->
         <div class="stacked-header">
           <div class="stacked-title">Beam Analysis — Stacked Diagrams</div>
+
+          <!-- Four chips showing the max/min values for SFD and BMD.
+               The values inside <strong> are updated by main.js after solving.
+               <sub> makes the subscript text (e.g. "max" in SF_max) -->
           <div class="stacked-extremes">
             <span class="se-chip sfd-col">SF<sub>max</sub> <strong id="sfdMax">—</strong> kN</span>
             <span class="se-chip sfd-col">SF<sub>min</sub> <strong id="sfdMin">—</strong> kN</span>
@@ -95,50 +225,89 @@
           </div>
         </div>
 
-        <!-- Row labels (left side) -->
+        <!-- The body of the stacked panel: row labels on the left + canvas on the right -->
         <div class="stacked-body">
+
+          <!-- Vertical labels on the left edge identifying each row -->
           <div class="stacked-labels">
-            <div class="row-label">BEAM</div>
-            <div class="row-label sfd-col">SFD</div>
-            <div class="row-label bmd-col">BMD</div>
+            <div class="row-label">BEAM</div>       <!-- Label for top row: beam schematic -->
+            <div class="row-label sfd-col">SFD</div><!-- Label for middle row: shear force diagram -->
+            <div class="row-label bmd-col">BMD</div><!-- Label for bottom row: bending moment diagram -->
           </div>
 
-          <!-- Single unified canvas -->
+          <!-- The canvas wrapper — main.js finds the canvas and draws everything on it -->
           <div class="stacked-canvas-wrap">
+            <!-- id="unifiedCanvas" : main.js uses this to find and draw on the canvas
+                 aria-label : describes the canvas to screen readers -->
             <canvas id="unifiedCanvas" aria-label="Unified beam, SFD and BMD diagram"></canvas>
           </div>
+
         </div>
 
-        <!-- Shared x-axis label -->
+        <!-- Shared x-axis label below all three diagrams -->
         <div class="stacked-xaxis">Position along span, x (m)</div>
 
       </div>
+      <!-- End of stacked diagram panel -->
 
+
+      <!-- ── NUMERICAL RESULTS TABLE ───────────────── -->
+      <!-- Shows shear force and bending moment values at key positions:
+           supports, load points (just before, at, and just after), and midspan -->
       <div class="table-wrap">
-        <div class="table-head"><h3>Numerical Results &#8212; Key Sections</h3></div>
+
+        <!-- Table header bar -->
+        <div class="table-head">
+          <h3>Numerical Results &#8212; Key Sections</h3>
+          <!-- &#8212; is the — em dash character -->
+        </div>
+
+        <!-- Scrollable wrapper for the table (allows horizontal scroll on small screens) -->
         <div class="table-scroll">
           <table>
             <thead>
               <tr>
-                <th>Section</th>
-                <th>x (m)</th>
-                <th>SF (kN)</th>
-                <th>BM (kN&middot;m)</th>
+                <th>Section</th>              <!-- Name/label of the position -->
+                <th>x (m)</th>               <!-- Distance from support A in metres -->
+                <th>SF (kN)</th>             <!-- Shear force in kilonewtons -->
+                <th>BM (kN&middot;m)</th>    <!-- Bending moment in kilonewton-metres -->
+                <!-- &middot; is the · middle dot multiplication symbol -->
               </tr>
             </thead>
+
+            <!-- tbody is empty — main.js fills this with rows after solving -->
             <tbody id="resultsTable"></tbody>
           </table>
         </div>
+
       </div>
+      <!-- End of numerical results table -->
 
     </div>
+    <!-- End of resultsContent -->
+
   </main>
+  <!-- End of main content -->
 
 </div>
+<!-- End of main layout grid -->
 
+
+<!-- ═══════════════════════════════════════════════════════
+     STATUS BAR
+     A thin bar at the very bottom of the page.
+     Shows a coloured dot and a message indicating the current state.
+     aria-live="polite" announces updates to screen readers.
+═══════════════════════════════════════════════════════ -->
 <div class="status-bar" aria-live="polite">
+
+  <!-- The coloured dot — CSS class is changed by main.js to reflect state
+       (no extra class = green, "error" = red, "loading" = pulsing blue) -->
   <div class="status-dot" id="statusDot"></div>
+
+  <!-- The status message text — updated by main.js via setStatus() -->
   <span id="statusText">Ready &#8212; configure beam and click Analyze</span>
+
 </div>
 
 </body>
